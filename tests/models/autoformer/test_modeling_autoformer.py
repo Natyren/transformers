@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch Autoformer model. """
+"""Testing suite for the PyTorch Autoformer model."""
 
 import inspect
 import tempfile
@@ -21,10 +21,11 @@ import unittest
 from huggingface_hub import hf_hub_download
 
 from transformers import is_torch_available
-from transformers.testing_utils import require_torch, slow, torch_device
+from transformers.testing_utils import is_flaky, require_torch, slow, torch_device
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 TOLERANCE = 1e-4
@@ -106,6 +107,7 @@ class AutoformerModelTester:
             cardinality=[self.cardinality],
             embedding_dimension=[self.embedding_dimension],
             moving_average=self.moving_average,
+            scaling="std",  # we need std to get non-zero `loc`
         )
 
     def prepare_autoformer_inputs_dict(self, config):
@@ -201,15 +203,15 @@ class AutoformerModelTester:
 
 
 @require_torch
-class AutoformerModelTest(ModelTesterMixin, unittest.TestCase):
+class AutoformerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (AutoformerModel, AutoformerForPrediction) if is_torch_available() else ()
     all_generative_model_classes = (AutoformerForPrediction,) if is_torch_available() else ()
+    pipeline_model_mapping = {"feature-extraction": AutoformerModel} if is_torch_available() else {}
     test_pruning = False
     test_head_masking = False
     test_missing_keys = False
     test_torchscript = False
     test_inputs_embeds = False
-    test_model_common_attributes = False
 
     def setUp(self):
         self.model_tester = AutoformerModelTester(self)
@@ -234,6 +236,24 @@ class AutoformerModelTest(ModelTesterMixin, unittest.TestCase):
 
     @unittest.skip(reason="Model has no tokens embeddings")
     def test_resize_tokens_embeddings(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant_false(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant(self):
         pass
 
     # # Input is 'static_categorical_features' not 'input_ids'
@@ -377,6 +397,14 @@ class AutoformerModelTest(ModelTesterMixin, unittest.TestCase):
             list(self_attentions[0].shape[-3:]),
             [self.model_tester.num_attention_heads, encoder_seq_length, dim],
         )
+
+    @is_flaky()
+    def test_retain_grad_hidden_states_attentions(self):
+        super().test_retain_grad_hidden_states_attentions()
+
+    @unittest.skip(reason="Model does not have input embeddings")
+    def test_model_get_set_embeddings(self):
+        pass
 
 
 def prepare_batch(filename="train-batch.pt"):

@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the TensorFlow SAM model. """
-
+"""Testing suite for the TensorFlow SAM model."""
 
 from __future__ import annotations
 
@@ -36,6 +35,7 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers import SamProcessor, TFSamModel
+    from transformers.modeling_tf_utils import keras
 
 if is_vision_available():
     from PIL import Image
@@ -322,9 +322,9 @@ class TFSamModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
 
         for model_class in self.all_model_classes:
             model = model_class(config)
-            self.assertIsInstance(model.get_input_embeddings(), (tf.keras.layers.Layer))
+            self.assertIsInstance(model.get_input_embeddings(), (keras.layers.Layer))
             x = model.get_output_embeddings()
-            self.assertTrue(x is None or isinstance(x, tf.keras.layers.Dense))
+            self.assertTrue(x is None or isinstance(x, keras.layers.Dense))
 
     def test_forward_signature(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
@@ -427,8 +427,9 @@ def prepare_dog_img():
     return raw_image
 
 
+@require_tf
 @slow
-class SamModelIntegrationTest(unittest.TestCase):
+class TFSamModelIntegrationTest(unittest.TestCase):
     def test_inference_mask_generation_no_point(self):
         model = TFSamModel.from_pretrained("facebook/sam-vit-base")
         processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
@@ -627,9 +628,7 @@ class SamModelIntegrationTest(unittest.TestCase):
 
         raw_image = prepare_image()
 
-        # fmt: off
-        input_points = tf.convert_to_tensor([[[400, 650]], [[220, 470]]])
-        # fmt: on
+        input_points = tf.convert_to_tensor([[[400, 650]], [[220, 470]]])  # fmt: skip
 
         input_points = tf.expand_dims(input_points, 0)
 
