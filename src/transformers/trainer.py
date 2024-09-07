@@ -2325,6 +2325,7 @@ class Trainer:
 
                 with self.accelerator.accumulate(model):
                     tr_loss_step = self.training_step(model, inputs)
+                    print(f"Step: {step}, Training Loss: {tr_loss_step}")
 
                 if (
                     args.logging_nan_inf_filter
@@ -2333,18 +2334,22 @@ class Trainer:
                 ):
                     # if loss is nan or inf simply add the average of previous logged losses
                     tr_loss += tr_loss / (1 + self.state.global_step - self._globalstep_last_logged)
+                    print(f"Step: {step}, NaN/Inf detected. Using average of previous losses.")
                 else:
                     if tr_loss.device != tr_loss_step.device:
                         raise ValueError(
                             f"Calculated loss must be on the original device: {tr_loss.device} but device in use is {tr_loss_step.device}"
                         )
                     tr_loss += tr_loss_step
+                    print(f"Step: {step}, Accumulated Loss: {tr_loss}")
 
                 self.current_flos += float(self.floating_point_ops(inputs))
+                print(f"Step: {step}, Current FLOPS: {self.current_flos}")
 
                 is_last_step_and_steps_less_than_grad_acc = (
                     steps_in_epoch <= args.gradient_accumulation_steps and (step + 1) == steps_in_epoch
                 )
+                print(f"Step: {step}, Is last step and steps less than grad acc: {is_last_step_and_steps_less_than_grad_acc}")
 
                 if (
                     total_batched_samples % args.gradient_accumulation_steps == 0
@@ -2352,13 +2357,16 @@ class Trainer:
                     # last step in epoch but step is always smaller than gradient_accumulation_steps
                     is_last_step_and_steps_less_than_grad_acc
                 ):
+                    print(f"Step: {step}, Performing gradient update")
                     # the `or` condition of `is_last_step_and_steps_less_than_grad_acc` is not covered
                     # in accelerate. So, explicitly enable sync gradients to True in that case.
                     if is_last_step_and_steps_less_than_grad_acc:
                         self.accelerator.gradient_state._set_sync_gradients(True)
+                        print(f"Step: {step}, Sync gradients set to True")
 
                     # Gradient clipping
                     if args.max_grad_norm is not None and args.max_grad_norm > 0:
+                        print(f"Step: {step}, Performing gradient clipping")
                         # deepspeed does its own clipping
 
                         if is_sagemaker_mp_enabled() and args.fp16:
@@ -2374,6 +2382,7 @@ class Trainer:
                                 model.parameters(),
                                 args.max_grad_norm,
                             )
+                        print(f"Step: {step}, Gradient norm after clipping: {_grad_norm}")
 
                         if (
                             is_accelerate_available()
@@ -2385,8 +2394,10 @@ class Trainer:
                                 grad_norm = grad_norm.item()
                         else:
                             grad_norm = _grad_norm
+                        print(f"Step: {step}, Global gradient norm: {grad_norm}")
 
                     self.optimizer.step()
+                    print(f"Step: {step}, Optimizer step performed")
 
                     self.control = self.callback_handler.on_optimizer_step(args, self.state, self.control)
 
@@ -2395,15 +2406,19 @@ class Trainer:
                         # Delay optimizer scheduling until metrics are generated
                         if not isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                             self.lr_scheduler.step()
+                            print(f"Step: {step}, Learning rate scheduler step performed")
 
                     model.zero_grad()
+                    print(f"Step: {step}, Model gradients zeroed")
                     self.state.global_step += 1
                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
+                    print(f"Step: {step}, Global step: {self.state.global_step}, Epoch: {self.state.epoch}")
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
 
                     self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
                 else:
                     self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
+                    print(f"Step: {step}, Substep end")
 
                 if self.control.should_epoch_stop or self.control.should_training_stop:
                     # PyTorch/XLA relies on the data loader to insert the mark_step for
@@ -2411,6 +2426,7 @@ class Trainer:
                     # insert the mark_step here.
                     if is_torch_xla_available():
                         xm.mark_step()
+                    print(f"Step: {step}, Early stopping triggered")
                     break
             if step < 0:
                 logger.warning(
@@ -2419,9 +2435,11 @@ class Trainer:
                     f" num_steps ({max_steps}) higher than the number of available samples."
                 )
                 self.control.should_training_stop = True
+                print("Training stopped due to empty epoch iterator")
 
             self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
             self._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
+            print(f"Epoch {epoch} ended")
 
             if DebugOption.TPU_METRICS_DEBUG in self.args.debug:
                 if is_torch_xla_available():
@@ -2433,6 +2451,7 @@ class Trainer:
                         "configured. Check your training configuration if this is unexpected."
                     )
             if self.control.should_training_stop:
+                print("Training stop signal received")
                 break
 
         if args.past_index and hasattr(self, "_past"):
@@ -2450,11 +2469,13 @@ class Trainer:
                 smp.barrier()
 
             self._load_best_model()
+            print("Best model loaded")
 
         # add remaining tr_loss
         self._total_loss_scalar += tr_loss.item()
         effective_global_step = max(self.state.global_step, 0.001)  # Avoid ZeroDivisionError
         train_loss = self._total_loss_scalar / effective_global_step
+        print(f"Final train loss: {train_loss}")
 
         metrics = speed_metrics(
             "train",
@@ -2466,6 +2487,7 @@ class Trainer:
         self.store_flos()
         metrics["total_flos"] = self.state.total_flos
         metrics["train_loss"] = train_loss
+        print(f"Final metrics: {metrics}")
 
         self.is_in_train = False
 
@@ -2482,6 +2504,7 @@ class Trainer:
                 if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):
                     logger.info(f"Deleting older checkpoint [{checkpoint}] due to args.save_total_limit")
                     shutil.rmtree(checkpoint, ignore_errors=True)
+                    print(f"Deleted checkpoint: {checkpoint}")
 
         self.control = self.callback_handler.on_train_end(args, self.state, self.control)
 
@@ -2492,6 +2515,7 @@ class Trainer:
         # for the embedding layer by removing the forward post hook.
         if self.neftune_noise_alpha is not None:
             self._deactivate_neftune(self.model)
+            print("NEFTune deactivated")
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
 
